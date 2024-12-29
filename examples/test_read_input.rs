@@ -47,8 +47,8 @@ fn run() -> Result<(), Box<dyn Error>> {
     println!("\nOpening connection");
     let in_port_name = midi_in.port_name(in_port)?;
 
-    let (num_leds, r, g, b) = (176, 0, 0, 1);
-    let data = vec![(r, g, b); num_leds];
+    let (num_leds, r, g, b) = (176, 0, 0, 0);
+    let mut data = vec![(r, g, b); num_leds];
 
     // _conn_in needs to be a named parameter, because it needs to be kept alive until the end of the scope
     let _conn_in = midi_in.connect(
@@ -59,6 +59,18 @@ fn run() -> Result<(), Box<dyn Error>> {
                 println!("{}: {:?} (len = {})", stamp, message, message.len());
 
                 let mut adapter = WS28xxSpiAdapter::new("/dev/spidev0.0").unwrap();
+
+                match message[0] {
+                    144 => { // Note on
+                        data[message[1] as usize] = (0, 0, message[2] as u8);
+                        adapter.write_rgb(&data).unwrap();
+                    }
+                    128 => { // Note off
+                        data[message[1] as usize] = (0, 0, 0);
+                        adapter.write_rgb(&data).unwrap();
+                    }
+                    _ => (),
+                }
 
                 adapter.write_rgb(&data).unwrap();
             }
