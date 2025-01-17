@@ -12,6 +12,22 @@ fn main() {
     }
 }
 
+fn get_led_index(key: u8) -> usize {
+	let led_offset;
+
+	if key < 56 {
+		led_offset = 39;
+	} else if key < 69 {
+		led_offset = 40;
+	} else if key < 93 {
+		led_offset = 41;
+	} else {
+		led_offset = 42;
+	}
+
+	key as usize * 2 - led_offset
+}
+
 fn run() -> Result<(), Box<dyn Error>> {
     let mut input = String::new();
 
@@ -49,7 +65,6 @@ fn run() -> Result<(), Box<dyn Error>> {
 
     let (num_leds, r, g, b) = (176, 0, 0, 0);
     let mut data = vec![(r, g, b); num_leds];
-    let mut led_offset = 0;
 
     // _conn_in needs to be a named parameter, because it needs to be kept alive until the end of the scope
     let _conn_in = midi_in.connect(
@@ -61,24 +76,17 @@ fn run() -> Result<(), Box<dyn Error>> {
 
                 let mut adapter = WS28xxSpiAdapter::new("/dev/spidev0.0").unwrap();
 
-                if message[1] < 56 {
-                    led_offset = 39;
-                } else if message[1] < 69 {
-                    led_offset = 40;
-                } else if message[1] < 93 {
-                    led_offset = 41;
-                } else {
-                    led_offset = 42;
-                }
+                let key = message[1];
+                let index = get_led_index(key);
 
                 match message[0] {
                     144 => { // Note on
-                        // data[message[1] as usize * 2 - 39] = (0, 0, message[2] as u8);
-                        data[message[1] as usize * 2 - led_offset] = (0, 0, 1);
+                        // data[index] = (0, 0, message[2] as u8);
+                        data[index] = (0, 0, 1);
                         adapter.write_rgb(&data).unwrap();
                     }
                     128 => { // Note off
-                        data[message[1] as usize * 2 - led_offset] = (0, 0, 0);
+                        data[index] = (0, 0, 0);
                         adapter.write_rgb(&data).unwrap();
                     }
                     _ => (),
