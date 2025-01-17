@@ -47,16 +47,32 @@ fn run() -> Result<(), Box<dyn Error>> {
         }
         _ => {
             println!("\nAvailable input ports:");
+
+            let mut found_port = None;
+
             for (i, p) in in_ports.iter().enumerate() {
                 println!("{}: {}", i, midi_in.port_name(p).unwrap());
+
+                // if USB-MIDI is in the name, use that port
+                if midi_in.port_name(p).unwrap().contains("USB-MIDI") {
+                    println!("Choosing USB-MIDI port: {}", midi_in.port_name(p).unwrap());
+                    found_port = Some(p);
+
+                    break;
+                }
             }
-            print!("Please select input port: ");
-            stdout().flush()?;
-            let mut input = String::new();
-            stdin().read_line(&mut input)?;
-            in_ports
-                .get(input.trim().parse::<usize>()?)
-                .ok_or("invalid input port selected")?
+
+            if let Some(p) = found_port {
+                p
+            } else {
+                print!("Please select input port: ");
+                stdout().flush()?;
+                let mut input = String::new();
+                stdin().read_line(&mut input)?;
+                in_ports
+                    .get(input.trim().parse::<usize>()?)
+                    .ok_or("invalid input port selected")?
+            }
         }
     };
 
