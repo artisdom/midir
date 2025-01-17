@@ -1,5 +1,7 @@
 use std::error::Error;
 use std::io::{stdin, stdout, Write};
+use ws2818_rgb_led_spi_driver::adapter_gen::{WS28xxAdapter, HardwareDev};
+use ws2818_rgb_led_spi_driver::adapter_spi::WS28xxSpiAdapter;
 
 use midir::{Ignore, MidiInput};
 
@@ -8,6 +10,22 @@ fn main() {
         Ok(_) => (),
         Err(err) => println!("Error: {}", err),
     }
+}
+
+fn get_led_index(key: u8) -> usize {
+	let led_offset;
+
+	if key < 56 {
+		led_offset = 39;
+	} else if key < 69 {
+		led_offset = 40;
+	} else if key < 93 {
+		led_offset = 41;
+	} else {
+		led_offset = 42;
+	}
+
+	key as usize * 2 - led_offset
 }
 
 fn run() -> Result<(), Box<dyn Error>> {
@@ -29,28 +47,69 @@ fn run() -> Result<(), Box<dyn Error>> {
         }
         _ => {
             println!("\nAvailable input ports:");
+
+            let mut found_port = None;
+
             for (i, p) in in_ports.iter().enumerate() {
                 println!("{}: {}", i, midi_in.port_name(p).unwrap());
+
+                // if USB-MIDI is in the name, use that port
+                if midi_in.port_name(p).unwrap().contains("USB-MIDI") {
+                    println!("Choosing USB-MIDI port: {}", midi_in.port_name(p).unwrap());
+                    found_port = Some(p);
+
+                    break;
+                }
             }
-            print!("Please select input port: ");
-            stdout().flush()?;
-            let mut input = String::new();
-            stdin().read_line(&mut input)?;
-            in_ports
-                .get(input.trim().parse::<usize>()?)
-                .ok_or("invalid input port selected")?
+
+            if let Some(p) = found_port {
+                p
+            } else {
+                print!("Please select input port: ");
+                stdout().flush()?;
+                let mut input = String::new();
+                stdin().read_line(&mut input)?;
+                in_ports
+                    .get(input.trim().parse::<usize>()?)
+                    .ok_or("invalid input port selected")?
+            }
         }
     };
 
     println!("\nOpening connection");
     let in_port_name = midi_in.port_name(in_port)?;
 
+    let (num_leds, r, g, b) = (176, 0, 0, 0);
+    let mut data = vec![(r, g, b); num_leds];
+
     // _conn_in needs to be a named parameter, because it needs to be kept alive until the end of the scope
     let _conn_in = midi_in.connect(
         in_port,
         "midir-read-input",
         move |stamp, message, _| {
-            println!("{}: {:?} (len = {})", stamp, message, message.len());
+            if message[0] != 254 {
+                println!("{}: {:?} (len = {})", stamp, message, message.len());
+
+                let mut adapter = WS28xxSpiAdapter::new("/dev/spidev0.0").unwrap();
+
+                let key = message[1];
+                let index = get_led_index(key);
+
+                match message[0] {
+                    144 => { // Note on
+                        // data[index] = (0, 0, message[2] as u8);
+                        data[index] = (0, 0, 1);
+                        adapter.write_rgb(&data).unwrap();
+                    }
+                    128 => { // Note off
+                        data[index] = (0, 0, 0);
+                        adapter.write_rgb(&data).unwrap();
+                    }
+                    _ => (),
+                }
+
+                adapter.write_rgb(&data).unwrap();
+            }
         },
         (),
     )?;
