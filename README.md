@@ -13,9 +13,12 @@ Cross-platform, realtime MIDI processing in Rust.
 - [x] CoreMIDI (macOS, iOS)
 - [x] WinRT (Windows 8+), enable the `winrt` feature
 - [x] Jack (Linux, macOS), enable the `jack` feature
+- [x] Bluetooth MIDI (Linux, Windows, macOS, iOS, Android), enable the `bluetooth` feature
 - [x] Web MIDI (Chrome, Opera, perhaps others browsers)
+
+A note on Android: `btleplug` requires its Java helper to call `btleplug::platform::init(...)` before the Rust side can access Bluetooth; see the btleplug README for the full setup steps.
 
 A higher-level API for parsing and assembling MIDI messages might be added in the future.
 
 ## Documentation & Example
-API docs can be found at [docs.rs](https://docs.rs/crate/midir/). You can find some examples in the [`examples`](examples/) directory. Or simply run `cargo run --example test_play` after cloning this repository.
+API docs can be found at [docs.rs](https://docs.rs/crate/midir/). You can find some examples in the [`examples`](examples/) directory. Or simply run `cargo run --example test_play` after cloning this repository. For Bluetooth devices, run `cargo run --example test_bluetooth --features bluetooth`.
