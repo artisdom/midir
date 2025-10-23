@@ -397,7 +397,7 @@ async fn discover_ports_async() -> Result<Vec<BluetoothPort>, &'static str> {
             .start_scan(ScanFilter::default())
             .await
             .map_err(|_| SCAN_ERROR)?;
-        tokio::time::sleep(Duration::from_millis(400)).await;
+        tokio::time::sleep(Duration::from_millis(40000)).await;
         let peripherals = adapter.peripherals().await.map_err(|_| ADAPTER_ERROR)?;
         for peripheral in peripherals {
             if let Ok(Some(properties)) = peripheral.properties().await {
@@ -742,6 +742,14 @@ fn is_midi_device(properties: &PeripheralProperties) -> bool {
     {
         return true;
     }
+
+    // Some devices may not advertise services; check local name for "MIDI", e.g., "GZUT-MIDI"
+    if let Some(name) = &properties.local_name {
+        if name.to_uppercase().contains("MIDI") {
+            return true;
+        }
+    }
+
     false
 }
 
