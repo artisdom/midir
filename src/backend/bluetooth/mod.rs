@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::{Builder, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -29,6 +29,7 @@ const CHARACTERISTIC_ERROR: &str = "Bluetooth MIDI characteristic not available"
 const SUBSCRIBE_ERROR: &str = "failed to subscribe to Bluetooth MIDI notifications";
 const NOTIFICATION_ERROR: &str = "failed to receive Bluetooth MIDI notifications";
 const WRITE_ERROR: &str = "failed to send Bluetooth MIDI data";
+const PORT_CACHE_TTL: Duration = Duration::from_secs(15);
 
 #[derive(Clone)]
 struct BluetoothPort {
@@ -53,6 +54,43 @@ impl BluetoothPort {
             format_peripheral_id(&self.peripheral_id)
         )
     }
+}
+
+#[derive(Default)]
+struct PortsCache {
+    snapshot: Option<Arc<Vec<BluetoothPort>>>,
+    last_updated: Option<Instant>,
+}
+
+static PORT_CACHE: OnceLock<Mutex<PortsCache>> = OnceLock::new();
+
+fn port_cache() -> &'static Mutex<PortsCache> {
+    PORT_CACHE.get_or_init(|| Mutex::new(PortsCache::default()))
+}
+
+fn shared_bluetooth_ports() -> Result<Arc<Vec<BluetoothPort>>, &'static str> {
+    let now = Instant::now();
+
+    if let Some(snapshot) = {
+        let cache = port_cache().lock().unwrap();
+        if let (Some(snapshot), Some(last)) = (&cache.snapshot, cache.last_updated) {
+            if now.duration_since(last) <= PORT_CACHE_TTL {
+                Some(snapshot.clone())
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    } {
+        return Ok(snapshot);
+    }
+
+    let ports = Arc::new(perform_discovery_sync()?);
+    let mut cache = port_cache().lock().unwrap();
+    cache.snapshot = Some(Arc::clone(&ports));
+    cache.last_updated = Some(Instant::now());
+    Ok(ports)
 }
 
 #[derive(Clone, PartialEq)]
@@ -137,11 +175,13 @@ impl MidiInput {
     }
 
     pub(crate) fn ports_internal(&self) -> Vec<crate::common::MidiInputPort> {
-        match discover_ports_sync() {
+        match shared_bluetooth_ports() {
             Ok(ports) => ports
-                .into_iter()
+                .iter()
                 .map(|port| crate::common::MidiInputPort {
-                    imp: MidiInputPort { inner: port },
+                    imp: MidiInputPort {
+                        inner: port.clone(),
+                    },
                 })
                 .collect(),
             Err(_) => Vec::new(),
@@ -149,7 +189,9 @@ impl MidiInput {
     }
 
     pub fn port_count(&self) -> usize {
-        self.ports_internal().len()
+        shared_bluetooth_ports()
+            .map(|ports| ports.len())
+            .unwrap_or(0)
     }
 
     pub fn port_name(&self, port: &MidiInputPort) -> Result<String, PortInfoError> {
@@ -278,11 +320,13 @@ impl MidiOutput {
     }
 
     pub(crate) fn ports_internal(&self) -> Vec<crate::common::MidiOutputPort> {
-        match discover_ports_sync() {
+        match shared_bluetooth_ports() {
             Ok(ports) => ports
-                .into_iter()
+                .iter()
                 .map(|port| crate::common::MidiOutputPort {
-                    imp: MidiOutputPort { inner: port },
+                    imp: MidiOutputPort {
+                        inner: port.clone(),
+                    },
                 })
                 .collect(),
             Err(_) => Vec::new(),
@@ -290,7 +334,9 @@ impl MidiOutput {
     }
 
     pub fn port_count(&self) -> usize {
-        self.ports_internal().len()
+        shared_bluetooth_ports()
+            .map(|ports| ports.len())
+            .unwrap_or(0)
     }
 
     pub fn port_name(&self, port: &MidiOutputPort) -> Result<String, PortInfoError> {
@@ -380,7 +426,7 @@ fn ensure_bluetooth_manager() -> Result<(), InitError> {
     result
 }
 
-fn discover_ports_sync() -> Result<Vec<BluetoothPort>, &'static str> {
+fn perform_discovery_sync() -> Result<Vec<BluetoothPort>, &'static str> {
     let runtime = Runtime::new().map_err(|_| RUNTIME_ERROR)?;
     let ports = runtime.block_on(discover_ports_async());
     drop(runtime);
@@ -397,7 +443,7 @@ async fn discover_ports_async() -> Result<Vec<BluetoothPort>, &'static str> {
             .start_scan(ScanFilter::default())
             .await
             .map_err(|_| SCAN_ERROR)?;
-        tokio::time::sleep(Duration::from_millis(40000)).await;
+        tokio::time::sleep(Duration::from_millis(10000)).await;
         let peripherals = adapter.peripherals().await.map_err(|_| ADAPTER_ERROR)?;
         for peripheral in peripherals {
             if let Ok(Some(properties)) = peripheral.properties().await {
